@@ -8,6 +8,7 @@ RJB (@RadioJunkBox)
 ■履歴
 ・2020/6/14 初版
 ・2020/6/27 Version 1.11　PCG8200モード、PCGフルドットカラー機能追加
+・2020/7/12 Version 1.12　PSG機能追加、PCG8200、FDCモードバグフィックス（@Chiqlappeさん）
 
 
 ■概要
@@ -94,6 +95,15 @@ RJB (@RadioJunkBox)
 　　98-9Fh　RAM選択 bit1:赤 bit0:緑　ex. OUT &H98,2 → 書込みRAM:赤（青は常時選択）
 　※PCG8200モードおよびフルドットカラー機能は動作が十分確認できてません
 
+　○PSG
+　・なんちゃってPSG(AY-3-891x相当)によるPSGサウンド（890x 2個分、6Voice）を発生できます。
+　・I/Oポートは、PC-8801-10相当です。
+　・PSGへの供給クロックは3.58MHzですが、4MHzにしたい場合はpc8001m.vを書き換えてください。
+　・PSG出力は1bit DACから出力されます
+   A0h : PSG1レジスタ選択  A1h : PSG1データ入出力 
+   A2h : PSG2レジスタ選択  A3h : PSG2データ入出力
+　・実際の891xチップと動作を比較してないので挙動が違う可能性があります
+
 　○CMT（カセットテープI/F）/SIO
 　・不安定であり、現時点はおまけ程度の機能です。（読み込めるが中身がエラーになっている場合がある）
 　・CMT出力(FSK)信号は、SW2でBEEP出力を切り替えができます。
@@ -135,6 +145,9 @@ RJB (@RadioJunkBox)
 　・また、FPGAボードに直接スピーカーやリレーなど重い負荷を接続すると壊れる場合があります。
 
 　＜DE0-CV＞
+　○サウンド出力(1bit DAC) ※出力回路が簡単なこちらの使用を推奨
+　・dac_out	出力	JP2-32		PIN_F15　PSG/PCG/BEEP(CMT) 1bit DAC出力
+
 　○サウンド出力
 　・audio_out[0]	出力	JP2-37		PIN_G13　PCGサウンド 0
 　・audio_out[1]	出力	JP2-38		PIN_G12　PCGサウンド 1
@@ -164,6 +177,9 @@ RJB (@RadioJunkBox)
 　・sd_cmd	出力	JP1-33		PIN_AA6　CMD
 　・sd_res	出力	JP1-34		PIN_Y5 　DATA_3/CD
 
+　○サウンド出力(1bit DAC) ※出力回路が簡単なこちらの使用を推奨
+　・dac_out	出力	JP1-27		PIN_AA8　PSG/PCG/BEEP(CMT) 1bit DAC出力
+
 　○サウンド出力
 　・audio_out[0]	出力	JP1-37		PIN_AB3　PCGサウンド 0
 　・audio_out[1]	出力	JP1-38		PIN_Y3 　PCGサウンド 1
@@ -185,6 +201,21 @@ RJB (@RadioJunkBox)
 
 
 　＜参考回路＞　※FPGAボード側のGNDは省略しているので、もちろんどこかに接続してください
+
+  ○サウンド出力回路 (1bit DAC)
+   ・RCによる簡易LPF（fc〜16kHz）
+　　・PSGはこの回路しか出力しません。
+                                         10u
+       dac_out   o-----1k----o------o----||----o------o 
+                                    |   +      |        PSG/PCG/BEEP(CMT)サウンド出力
+                                    |          |      o
+                                   ---        10k     |
+                             0.01u ---         |      |
+                                    |          |      |
+                                   ---        ---    ---
+                             　     ///        ///    /// 
+
+
   ○サウンド出力回路
                                          33u
   audio_out[0]   o----10k----o------o----||----o------o 

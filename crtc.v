@@ -3,7 +3,9 @@
 // version 1.01b
 //
 // Orignal Auther	: kwhr0-san
-// Modifyed 		: RJB
+// Modified 		: RJB
+// 
+// 2020/7/12	Ver 1.12	 Chiqlappe-san modified PCG8200 mode and FDC *1
 //
 
 module crtc(
@@ -35,20 +37,21 @@ module crtc(
 	input wire				pcg_on,	
 	input wire [1:0]		fdc_cs,
 	input wire [2:0]		fdc_plt,
-	output wire [2:0]		plt_sel
+	output wire [2:0]		plt_sel,		// *1
+	output wire				vsync			// *1
 	);
 	
 	parameter START_H = 192;
-	parameter END_H = START_H + 640;
+	parameter END_H = START_H + 648;
 	parameter START_V = 40;
 	parameter END_V = START_V + 200;
 	parameter CHCNT_RESET_V = START_V - 1;
 
-	parameter START_H2 = 208;
-	parameter END_H2 = START_H2 + 640;
+	parameter START_H2 = 200;
+	parameter END_H2 = START_H2 + 648;
 	parameter START_V2 = 81;
 	parameter END_V2 = START_V2 + 401;
-
+	
 	
 	function sel2;
 		input [1:0] s;
@@ -88,7 +91,7 @@ module crtc(
 	wire vvalid = hcnt >= START_V & hcnt < END_V;
 	wire burst = dotcnt >= 76 & dotcnt < 112;
 	wire hsync = dotcnt < 67;
-	wire vsync = hcnt < 3;
+	assign vsync = hcnt < 3;	// *1
 	assign chlast = chcnt == lpc;
 
 	// VGA
@@ -259,7 +262,8 @@ module crtc(
 	
 	
 	assign	cg_adr = { text_data, chcnt[2:0] };
-	assign	wadr  = pcg_mode[5] ? pcg_adr : { 1'b1, pcg_adr[9:0]};
+//	assign	wadr  = pcg_mode[5] ? pcg_adr : { 1'b1, pcg_adr[9:0]};	// *1
+	assign	wadr	= {~pcg_adr[10], pcg_adr[9:0]};							// *1
 	
 	assign	wren  = pcg_mode[5] == 0 | pcg_mode[4] == 0 ? pcg_we : 1'b0;
 	assign	wren1 = pcg_mode[7] & fdc_cs[0] ? pcg_we :
@@ -370,10 +374,18 @@ module crtc(
 		end
 	end
 
+	// *1
+	wire fdc_en = ram_cs1 & ~atr[3] & pcg_mode[7];
+	wire d0 = hsync ~^ vsync;
+	wire y0 = (( fdc_en ? |fdc_plt : chrline[7]) & ~qinh) ^ qrev ^ qcurs;
+	wire [2:0] c0 = fdc_en & ~&plt_sel ? fdc_plt : color;
+
+/* *1
 	wire fdc_en = ram_cs1 & ~atr[3] & ~&plt_sel & pcg_mode[7];	
 	wire d0 = hsync ~^ vsync;
 	wire y0 = (( fdc_en ? |plt_sel : chrline[7]) & ~qinh) ^ qrev ^ qcurs;
 	wire [2:0] c0 = fdc_en ? fdc_plt : color;
+*/	
 	
 	always @(posedge clk) q0 <= d0;
 

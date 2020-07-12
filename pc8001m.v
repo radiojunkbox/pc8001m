@@ -3,13 +3,14 @@
 // pc8001m.v  "PC-8001 MODOKI"
 //
 // Orignal Auther	: kwhr0 san
-// Modifyed 		: RJB
+// Modified 		: RJB
 //
 // 2020/6/13  Ver 1.10 first published
 // 2020/6/27  Ver 1.11 added PCG8200 and Full Dot Color mode
+// 2020/7/12  Ver 1.12 added PSG and Chiqlappe-san modified PCG/FDC *1
 //
 // This Verilog HDL code is provided "AS IS", with NO WARRANTY.
-// NON-COMMERCIAL USE ONLY
+//	NON-COMMERCIAL USE ONLY
 //
 
 module pc8001m (
@@ -40,11 +41,13 @@ module pc8001m (
 	output wire			sd_clk,
 	output wire			sd_cmd,
 	output wire			sd_res,
-	output wire [3:0]	audio_out
+	output wire [3:0]	audio_out,
+	output wire			dac_out
 	);
 		
 	wire			clk2;		// pll clock 28.63636MHz
-	reg			clk;		// clock 14.31818MHz
+	wire			clk;		// clock 14.31818MHz
+	wire			clk3;		// clock  3.57954MHz
 	
 	wire			clk48;	// pll clock 48MHz
 	reg			clk4;		// clock 4MHz
@@ -65,6 +68,7 @@ module pc8001m (
 	wire [7:0]	mem_data;
 
 	wire [7:0]	uart_data;
+	wire [7:0]	psg_reg0, psg_reg1;
 
 	//
 	// Assign SW
@@ -103,7 +107,7 @@ module pc8001m (
 	//
 	reg [4:0] waitcount = 0;
 	wire start, waitreq;
-	assign waitreq = SW_OC ? start | waitcount < 10 : start | waitcount < 21;
+	assign waitreq = SW_OC ? start | waitcount < 12 : start | waitcount < 25; // Ver1.12 21 -> 25 
 
 	always @(posedge clk) begin
 		if (start) waitcount <= 0;
@@ -114,21 +118,26 @@ module pc8001m (
 	// I/O PORT
 	//
 	wire 			cdata;
+/* *1
 	reg [5:0]	vrtc = 0;
 	reg			iorq0 = 0, rd0 = 0, port40h0 = 0;
+*/
+	wire			vsync;	// *1
 
 	wire port00h = cpu_adr[7:4] == 4'h0;		// keyboard
 	wire port20h = cpu_adr[7:4] == 4'h2;		// uart
 	wire port30h = cpu_adr[7:4] == 4'h3;
 	wire port40h = cpu_adr[7:4] == 4'h4;
 	wire port90h = cpu_adr[7:4] == 4'h9;		// Full Dot Color
+	wire porta0h = cpu_adr[7:4] == 4'ha;		// PSG
 	wire porte0h = cpu_adr[7:4] == 4'he;
 	wire portf0h = cpu_adr[7:4] == 4'hf;
-	wire [7:0] port00data, port20data, port40data, portf0data;
+	wire [7:0] port00data, port20data, port40data, porta0data, portf0data;
 
 	assign port00data = ~keydata;
 	assign port20data = uart_data;
-	assign port40data = { 2'b00, vrtc[5], cdata, 1'b1, cdin, 2'b10 };
+//	assign port40data = { 2'b00, vrtc[5], cdata, 1'b1, cdin, 2'b10 };		// *1
+	assign port40data = { 2'b00, vsync, cdata, 1'b1, cdin, 2'b10 };		// *1
 	assign portf0data = cpu_adr[3:0] == 4'hd ? portB_out : { 3'b111, sd_dat, 4'b1111 };
 	reg [7:0] input_data;
 
@@ -137,17 +146,20 @@ module pc8001m (
 			4'h0:	input_data <= port00data;
 			4'h2:	input_data <= port20data;
 			4'h4:	input_data <= port40data;
+			4'ha:	input_data <= porta0data;
 			4'hf:	input_data <= portf0data;
 			default:	input_data <= 8'hff;
 		endcase
 	end
 	
+/*	*1
 	always @(posedge clk) begin
 		if (~iorq & iorq0 & rd0 & port40h0) vrtc <= vrtc + 1;
 		iorq0 <= iorq;
 		rd0 <= rd;
 		port40h0 <= port40h;
-	end	
+	end
+*/
 
 	//
 	// CPU Bus
@@ -236,6 +248,7 @@ module pc8001m (
 		end
 	end
 
+	
 	// 8253 Sound Gen.	
 	wire			pcg8253_wr;
 	wire[2:0]	pcg8253_gate;
@@ -253,7 +266,41 @@ module pc8001m (
 		.out		( pcg8253_out	)
 	);
 
+	//
+	// AY-3-891x PSG Sound Gen.
+	//
+	wire			psg_wr0 = iorq & wr & ( cpu_adr[7:1] == 7'b1010_000 );
+	wire			psg_wr1 = iorq & wr & ( cpu_adr[7:1] == 7'b1010_001 );
+	wire [9:0]	psg_out0;
+	wire [9:0]	psg_out1;
 
+	// unit 0  A0h,A1h
+	ltd891x psg891x_0 (
+		.clk		( clk				),
+		.reset	( reset			),
+		.adr		( cpu_adr[0]	),
+		.din		( cpu_data_out	),
+		.wr		( psg_wr0		),
+		.sclk		( clk3			),		// clock Source 3.58MHz
+//		.sclk		( clk4			),		// clock Source 4MHz
+		.dout		( psg_reg0		),
+		.out		( psg_out0		)
+	);
+	
+	// unit 1  A2h,A3h
+	ltd891x psg891x_1 (
+		.clk		( clk				),
+		.reset	( reset			),
+		.adr		( cpu_adr[0]	),
+		.din		( cpu_data_out	),
+		.wr		( psg_wr1		),
+		.sclk		( clk3			),		// clock Source 3.58MHz
+//		.sclk		( clk4			),		// clock Source 4MHz
+		.dout		( psg_reg1		),
+		.out		( psg_out1		)
+	);
+
+	
 	//
 	// SD Card
 	//
@@ -349,6 +396,29 @@ module pc8001m (
 	assign		audio_out[3] = ( SW_CMT & motor) ? cmt_out : beep_out;
 	assign		beep_out = beep_gate & clk_baud[7];
 	assign		motor_out = motor;
+
+	//
+	// 1bit Audio DAC
+	//
+	wire [10:0] dac_in;
+	wire [11:0] dac_sum;
+	reg [10:0]	dac_fbk;
+	reg			dac_bit;
+   	
+	assign dac_in = { 1'b0, psg_out0 } + { 1'b0, psg_out1 } +
+						 { 3'b000, pcg8253_out[0], 7'b0000000 } +
+						 { 3'b000, pcg8253_out[1], 7'b0000000 } +
+						 { 3'b000, pcg8253_out[2], 7'b0000000 } +
+						 { 3'b000, audio_out[3], 7'b0000000 };
+   
+	// delta-sigma Mod.
+	assign dac_sum = { 1'b0, dac_in } + { 1'b0, dac_fbk };
+	assign dac_out = dac_bit;
+
+	always @( posedge clk) begin
+		dac_fbk <= dac_sum[10:0];
+		dac_bit <= dac_sum[11];
+	end
 	
 	//
 	// CPU fz80 Core
@@ -404,7 +474,8 @@ module pc8001m (
 		.pcg_on		( pcg_on			),
 		.fdc_cs		( fdc_cs			),
 		.fdc_plt		( fdc_plt		),
-		.plt_sel		( plt_sel		)
+		.plt_sel		( plt_sel		),		// *1
+		.vsync		( vsync			)		// *1
 	);
 
 	//
@@ -543,7 +614,12 @@ module pc8001m (
 		.outclk_0	( clk2 	)		// clock out	28.63636MHz
 	);
 	
-	always @( posedge clk2) clk <= ~clk;
+	reg [2:0]	cnt;
+	assign 		clk = cnt[0];			// 14.31818MHz
+	assign 		clk3 = cnt[2];			//  3.57954MHz
+	always @ ( posedge clk2) begin
+		cnt <= cnt + 3'b01;
+	end
 	
 	//
 	// PLL 2
